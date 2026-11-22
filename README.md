@@ -35,7 +35,8 @@ Weather API ────┘   extract.py  transform.py   load.py                
                     full_weather_data.json                             fact_daily_weather
                     (raw snapshot)                                     etl_watermark
                                                                        rejected_records
-                                                                       etl_run_log
+Scheduler (cron / Task Scheduler) ─► pipeline.py (daily 06:00)         etl_run_log
+Logging ─► logs/pipeline.log
 ```
 
 ### Star schema
@@ -89,7 +90,7 @@ The fact table uses a **composite primary key** `(city_id, weather_date)` becaus
 - Writes one row to `etl_run_log` per load, `SUCCESS` or `FAILED` (the failure row is written in a separate transaction so the rollback does not erase it).
 
 ### Orchestrator (`pipeline.py`)
-Runs Extract -> Transform -> Load in order and exits with a non-zero code on failure, so a scheduler can detect it.
+Runs Extract -> Transform -> Load in order, logs to `logs/pipeline.log` and the console, and exits with a non-zero code on failure so a scheduler can detect it.
 
 ---
 
@@ -105,8 +106,11 @@ kenya_weather_pipeline/
 ├── transform.py          # reshape, derive, validate, build dim_date
 ├── load.py               # DDL, UPSERTs, watermark, run log, one transaction
 ├── pipeline.py           # orchestrator
+├── run_pipeline.sh       # launcher for cron (Linux / macOS / WSL)
+├── run_pipeline.bat      # launcher for Task Scheduler (Windows)
 ├── full_weather_data.json
 ├── transformed/          # CSV output when running transform.py directly
+├── logs/                 # pipeline.log and scheduler.log (not committed)
 └── README.md
 ```
 
@@ -157,6 +161,128 @@ python load.py --fresh              # alternative entry point: load with fresh e
 ```
 
 Running the pipeline twice in a row leaves the row counts unchanged because every write is an UPSERT.
+
+---
+
+## Scheduling a daily run
+
+The pipeline is scheduled to run every day at **06:00**. Pick the section that matches your system.
+
+> Do **not** schedule it with `--skip-extract`. That flag reuses the old JSON file, so no new days would ever arrive.
+
+Two log files are written:
+
+| File | Contains |
+|---|---|
+| `logs/pipeline.log` | Normal application logs (start, each step, finish, errors) |
+| `logs/scheduler.log` | System-level errors that happen before Python logging starts (missing module, wrong path) |
+
+### Option A: Linux, macOS or WSL (cron)
+
+Cron runs in a minimal shell that does not activate virtual environments or set the working directory, so it calls a small launcher script.
+
+**1. Prerequisites**
+
+```bash
+cd /path/to/kenya_weather_pipeline
+sudo apt update && sudo apt install -y python3-venv python3-pip cron   # Debian / Ubuntu / WSL
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+If you copied the project from Windows, delete the old Windows virtual environment folder first (for example `rm -rf python-weather`), because Windows `.exe` binaries cannot run on Linux.
+
+**2. Create the launcher `run_pipeline.sh`** (replace the path with your real project directory)
+
+```bash
+cat << 'EOF' > run_pipeline.sh
+#!/bin/bash
+PROJECT_DIR="/home/username/kenya_weather_pipeline"
+cd "$PROJECT_DIR" || exit 1
+mkdir -p logs
+"$PROJECT_DIR/venv/bin/python" pipeline.py >> "$PROJECT_DIR/logs/scheduler.log" 2>&1
+EOF
+chmod +x run_pipeline.sh
+```
+
+**3. Test it manually before scheduling**
+
+```bash
+./run_pipeline.sh
+cat logs/scheduler.log
+```
+
+Check that `logs/pipeline.log` has a clean start-to-finish block, then confirm a new row was added in the Aiven console:
+
+```sql
+SELECT * FROM etl_run_log ORDER BY run_id DESC LIMIT 5;
+```
+
+**4. Schedule it**
+
+```bash
+sudo service cron start      # start the cron service (WSL / some Linux setups)
+crontab -e                   # choose nano if asked
+```
+
+Add this line at the bottom (use your real path), then save with `Ctrl+O`, `Enter`, `Ctrl+X`:
+
+```
+0 6 * * * /home/username/kenya_weather_pipeline/run_pipeline.sh
+```
+
+Confirm it is registered:
+
+```bash
+crontab -l
+```
+
+> **WSL note:** WSL suspends background processes shortly after all Linux terminal windows are closed. Keep an Ubuntu terminal open during scheduled runs, or use Task Scheduler (Option B) if you run the project on Windows.
+
+### Option B: Windows (Task Scheduler)
+
+`crontab` does not exist on Windows (it fails with `crontab: command not found` in Git Bash). Use Task Scheduler instead.
+
+**1. Find your Python path** (with your virtual environment active)
+
+```bash
+python -c "import sys; print(sys.executable)"
+```
+
+**2. Create `run_pipeline.bat`** in the project folder, using your own paths
+
+```bat
+@echo off
+cd /d C:\Users\YOU\Desktop\kenya_weather_pipeline
+if not exist logs mkdir logs
+"C:\PATH\TO\YOUR\python.exe" pipeline.py >> logs\scheduler.log 2>&1
+```
+
+**3. Create the daily task.** Run this in **PowerShell or Command Prompt, not Git Bash** (Git Bash rewrites `/Create`-style options and breaks `schtasks`):
+
+```powershell
+schtasks /Create /SC DAILY /ST 06:00 /TN "KenyaWeatherPipeline" /TR "C:\Users\YOU\Desktop\kenya_weather_pipeline\run_pipeline.bat"
+```
+
+**4. Test it now**
+
+```powershell
+schtasks /Run /TN "KenyaWeatherPipeline"
+schtasks /Query /TN "KenyaWeatherPipeline" /V /FO LIST
+```
+
+Then check `logs\pipeline.log` for a fresh run and run the `etl_run_log` query above to see the new row.
+
+**5. Handle missed runs.** In Task Scheduler open the task, go to **Properties > Settings**, and tick **Run task as soon as possible after a scheduled start is missed**, so a run still happens if the computer was off at 06:00.
+
+### Confirming the schedule works
+
+After a scheduled time has passed, all three should be true:
+
+1. `logs/pipeline.log` has a new "Pipeline started ... finished" block.
+2. `etl_run_log` has a new row.
+3. The `fact_daily_weather` row count has not changed, apart from any genuinely new days.
 
 ---
 
@@ -251,6 +377,8 @@ Done:
 - [x] Composite-key UPSERTs in one transaction
 - [x] Rejected records and run log tables
 - [x] Secrets in `.env`, not in code
+- [x] File logging to `logs/pipeline.log`
+- [x] Daily scheduling (cron on Linux/macOS/WSL, Task Scheduler on Windows)
 
 Still to do (from the project brief):
 - [ ] **Retries with exponential backoff** (1s, 2s, 4s) in a reusable `get_json()`. Currently `extract.py` exits on the first network error.
@@ -258,8 +386,6 @@ Still to do (from the project brief):
 - [ ] **Continue when one town fails** instead of stopping the whole run.
 - [ ] **Log extract failures** to `etl_run_log` (today only the load step writes to it).
 - [ ] **Per-town reconciliation:** extracted = loaded + rejected.
-- [ ] **File logging** to `logs/pipeline.log`.
-- [ ] **Scheduling** with cron (Linux/macOS) or Task Scheduler (Windows).
 - [ ] Mombasa delete-and-reload test (delete the last 7 days, roll the watermark back, rerun).
 - [ ] Stretch goals: `--add-city`, `--full-refresh`, monthly summary table, late-arriving data reload.
 
