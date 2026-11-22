@@ -1,3 +1,4 @@
 .env
 python-weather/
 .vscode/
+__pycache__/
