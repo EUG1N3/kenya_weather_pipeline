@@ -18,7 +18,7 @@
     "weather": {
       "latitude": -1.3005272,
       "longitude": 36.824646,
-      "generationtime_ms": 3.855109214782715,
+      "generationtime_ms": 10.315895080566406,
       "utc_offset_seconds": 10800,
       "timezone": "Africa/Nairobi",
       "timezone_abbreviation": "GMT+3",
@@ -4182,7 +4182,7 @@
     "weather": {
       "latitude": -4.042179,
       "longitude": 39.68215,
-      "generationtime_ms": 14.800429344177246,
+      "generationtime_ms": 4.715561866760254,
       "utc_offset_seconds": 10800,
       "timezone": "Africa/Nairobi",
       "timezone_abbreviation": "GMT+3",
@@ -8346,7 +8346,7 @@
     "weather": {
       "latitude": -0.10544816,
       "longitude": 34.793453,
-      "generationtime_ms": 3.488302230834961,
+      "generationtime_ms": 10.76662540435791,
       "utc_offset_seconds": 10800,
       "timezone": "Africa/Nairobi",
       "timezone_abbreviation": "GMT+3",
@@ -12510,7 +12510,7 @@
     "weather": {
       "latitude": -0.31634444,
       "longitude": 36.070312,
-      "generationtime_ms": 4.696965217590332,
+      "generationtime_ms": 10.498404502868652,
       "utc_offset_seconds": 10800,
       "timezone": "Africa/Nairobi",
       "timezone_abbreviation": "GMT+3",
@@ -16674,7 +16674,7 @@
     "weather": {
       "latitude": 0.52724075,
       "longitude": 35.30932,
-      "generationtime_ms": 8.511662483215332,
+      "generationtime_ms": 4.547595977783203,
       "utc_offset_seconds": 10800,
       "timezone": "Africa/Nairobi",
       "timezone_abbreviation": "GMT+3",
